@@ -1,51 +1,48 @@
-# 3rd-PW-assignment
+#### *Task done as the third assignment in the Concurrent Programming course at MIMUW.*
 
-Zadanie polega na wykonaniu kilku implementacji kolejki nie-blokującej z wieloma czytelnikami i pisarzami: SimpleQueue, RingsQueue, LLQueue, BLQueue. Dwie implementacje polegają na użyciu zwykłych mutexów, a dwie kolejne na użyciu atomowych operacji, w tym kluczowego compare_exchange.
+The task is to implement multiple versions of a non-blocking queue with multiple readers and writers: **SimpleQueue, RingsQueue, LLQueue, BLQueue**. Two implementations rely on standard mutexes, while the other two use atomic operations, including the key **compare_exchange** operation.  
 
-W każdym przypadku implementacja składa się ze struktury <kolejka> oraz metod:
+Each implementation consists of a **queue structure** and the following methods:  
 
-<kolejka>* <kolejka>_new(void) - alokuje (malloc) i inicjalizuję nową kolejkę.
+- `<queue>* <queue>_new(void)` – allocates (`malloc`) and initializes a new queue.  
+- `void <queue>_delete(<queue>* queue)` – frees all memory allocated by the queue methods.  
+- `void <queue>_push(<queue>* queue, Value value)` – adds a value to the end of the queue.  
+- `Value <queue>_pop(<queue>* queue)` – retrieves a value from the front of the queue or returns `EMPTY_VALUE` if the queue is empty.  
+- `bool <queue>_is_empty(<queue>* queue)` – checks whether the queue is empty.  
 
-void <kolejka>_delete(<kolejka>* queue) - zwalnia wszelką pamięć zaalokowaną przez metody kolejki.
+(For example, the first implementation should define the structure **SimpleQueue** and methods such as `SimpleQueue* SimpleQueue_new(void)`, etc.)  
 
-void <kolejka>_push(<kolejka>* queue, Value value) - dodaje wartość na koniec kolejki.
+---
 
-Value <kolejka>_pop(<kolejka>* queue) - pobiera wartość z początku kolejki albo zwraca EMPTY_VALUE jeśli kolejka jest pusta.
+### Additional Rules  
 
-bool <kolejka>_is_empty(<kolejka>* queue) - sprawdza czy kolejka jest pusta.
+- Queue users do not use the values `EMPTY_VALUE=0` or `TAKEN_VALUE=-1` (these can be used as special markers).  
+- Queue users guarantee that they execute `new/delete` exactly **once**, before/after all `push/pop/is_empty` operations across all threads.  
 
-(Przykładowo pierwsza implementacja powinna definiować strukturę SimpleQueue oraz metody SimpleQueue* SimpleQueue_new(void) itp.)
+---
 
---------
+## Queue Implementations  
 
+### **SimpleQueue: Single-linked list queue with two mutexes**  
+This is one of the simpler queue implementations. A separate mutex for producers and consumers allows for better parallelization of operations.  
 
-Użytkownicy kolejki nie używają wartości EMPTY_VALUE=0 ani TAKEN_VALUE=-1 (można je wykorzystać jako specjalne).
+### **RingsQueue: Queue based on a list of cyclic buffers**  
+This combines **SimpleQueue** with a queue implemented on a **circular buffer**, merging the **unbounded size** of the first with the **efficiency** of the second (since singly linked lists are relatively slow due to constant memory allocations).  
 
-Użytkownicy kolejki gwarantują, że wykonują new/delete dokładnie raz, odpowiednio przed/po wszystkich operacjach push/pop/is_empty ze wszystkich wątków.
+### **LLQueue: Lock-free queue using a singly linked list**  
+This is one of the simplest **lock-free queue** implementations.  
 
+### **BLQueue: Lock-free queue with buffer lists**  
+This is a **simple yet highly efficient lock-free queue** implementation.  
+The idea behind this queue is to **combine a singly linked list with an array-based queue** that uses **atomic indices** for inserting and retrieving elements (though the number of operations would be limited by the array length).  
+To **combine the advantages of both**, the queue consists of a **list of arrays**; a new list node is created **only when the current array is full**. However, the array **is not** a circular buffer—each field in it is filled **at most once** (a circular buffer variant would be significantly harder to implement).  
 
+---
 
-------------
-SimpleQueue: kolejka z listy jednokierunkowej, z dwoma mutexami
+## **Hazard Pointer**  
 
-To jedna z prostszych implementacji kolejki. Osobny mutex dla producentów i dla konsumentów pozwala lepiej zrównoleglić operacje.
+A **Hazard Pointer** is a technique for safely **freeing memory** in **data structures shared across multiple threads** and dealing with the **ABA problem**.  
 
---------------
-RingsQueue: kolejka z listy buforów cyklicznych
+The idea is that each thread can **reserve** a memory address for a node (one per queue instance) that it needs to protect from deletion (or ABA replacement) during **push/pop/is_empty** operations.  
 
-To połączenie SimpleQueue z kolejką zaimplementowaną na buforze cyklicznym, łączące nieograniczony rozmiar pierwszej z wydajnością drugiej (listy jednokierunkowe są stosunkowo powolne ze względu na ciągłe alokacje pamięci).
-
--------------
-LLQueue: kolejka lock-free z listy jednokierunkowej
-
-To jedna z najprostszych implementacji kolejki lock-free.
-
---------------
-BLQueue: kolejka lock-free z listy buforów
-
-To jedna z prostszych a bardzo wydajnych implementacji kolejki. Idea tej kolejki to połączenie rozwiązania z listą jednokierunkową z rozwiązaniem gdzie kolejka jest prostą tablicą z atomowymi indeksami do wstawiania i pobierania elementów (ale liczba operacji byłaby ograniczona przez długość tablicy). Łączymy zalety obu robiąc listę tablic; do nowego węzła listy potrzebujemy przejść dopiero kiedy tablica się zapełniła. Tablica nie jest jednak tutaj buforem cyklicznym, każde pole w niej jest zapełnione co najwyżej raz (wariant z buforami cyklicznymi byłby dużo trudniejszy).
-
-----------------------------
-Hazard Pointer
-
-Hazar Pointer to technika do radzenia sobie z problemem bezpiecznego zwalniania pamięci w strukturach danych współdzielonych przez wiele wątków oraz z problemem ABA. Idea jest taka, że każdy wątek może zarezerwować sobie jeden adres na węzeł (jeden na każdą instację kolejki), który potrzebuje zabezpieczyć przed usunięciem (lub podmianą ABA) na czas operacji push/pop/is_empty. Chcąc zwolnić węzeł (free()), wątek zamiast tego dodaje jego adres na swój zbiór wycofanych adresów i później okresowo przegląda ten zbiór, zwalniając adresy, które nie są zarezerwowane.
+Instead of calling `free()` to delete a node, a thread **adds its address to a retired list** and later **periodically checks** this list, freeing addresses that are **no longer reserved**.
